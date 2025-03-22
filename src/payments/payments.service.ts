@@ -1,14 +1,24 @@
 /* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { Injectable } from '@nestjs/common';
-import { envs } from 'src/config';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { envs, NATS_SERVICE } from 'src/config';
 import Stripe from 'stripe';
 import { PaymentSessionDto } from './dto/payment-session.dto';
 import { Request, Response } from 'express';
+import { ClientProxy } from '@nestjs/microservices';
+
+interface PayloadPayment {
+  stripePaymentId: string;
+  orderId: string;
+  receiptUrl: string;
+}
 
 @Injectable()
 export class PaymentsService {
   private readonly stripe = new Stripe(envs.STRIPE_SECRET);
+  private readonly logger = new Logger('PaymentsService');
+
+  constructor(@Inject(NATS_SERVICE) private readonly client: ClientProxy) {}
 
   async createPaymentSession(paymentSessionDto: PaymentSessionDto) {
     const { currency, items, orderId } = paymentSessionDto;
@@ -37,15 +47,16 @@ export class PaymentsService {
         success_url: envs.SUCCESS_URL,
         cancel_url: envs.CANCEL_URL,
       });
-    return session;
+    return {
+      cancelUrl: session.cancel_url,
+      successUrl: session.success_url,
+      url: session.url,
+    };
   }
 
   async stripeWebhook(req: Request, res: Response) {
     const sig = req.headers['stripe-signature'];
-
     let event: Stripe.Event;
-
-    // Real
     const endpointSecret = envs.STRIPE_ENDPOINT_SECRET;
 
     try {
@@ -62,9 +73,12 @@ export class PaymentsService {
     switch (event.type) {
       case 'charge.succeeded': {
         const chargeSucceeded: Stripe.Charge = event.data.object;
-        console.log({
+        const payload: PayloadPayment = {
+          stripePaymentId: chargeSucceeded.id,
           orderId: chargeSucceeded.metadata.orderId,
-        });
+          receiptUrl: chargeSucceeded.receipt_url!,
+        };
+        this.client.emit({ cmd: 'payment.succeeded' }, payload);
         break;
       }
 

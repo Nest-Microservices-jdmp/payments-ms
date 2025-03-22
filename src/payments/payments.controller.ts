@@ -1,14 +1,31 @@
-import { Body, Controller, Get, Post, Req, Res } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Req,
+  Res,
+  ValidationPipe,
+} from '@nestjs/common';
 import { Request, Response } from 'express';
 import { PaymentsService } from './payments.service';
 import { PaymentSessionDto } from './dto/payment-session.dto';
+import { MessagePattern, Payload } from '@nestjs/microservices';
 
 @Controller('payments')
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
-  @Post()
-  async createPaymentSession(@Body() paymentSessionDto: PaymentSessionDto) {
+  @MessagePattern({ cmd: 'create.payment.session' })
+  async createPaymentSession(
+    @Payload(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
+    )
+    paymentSessionDto: PaymentSessionDto,
+  ) {
     return await this.paymentsService.createPaymentSession(paymentSessionDto);
   }
   @Post('webhook')
